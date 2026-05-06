@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  # The MCP server environment
+  mcp-dba-postgres:
+    image: valtoni/mcp-dba-postgres:1.0
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - PGUSER=postgres
+      - PGPASSWORD=localpassword
+      - PGHOST=postgres-db
+      - PGDATABASE=postgres
+    depends_on:
+      - postgres-db
+
+  # A mock PostgreSQL database for development and testing
+  postgres-db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=localpassword
+      - POSTGRES_DB=postgres
+    ports:
+      - "5432:5432"
