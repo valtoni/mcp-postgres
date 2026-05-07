@@ -1,8 +1,13 @@
 use anyhow::Result;
-use tokio_postgres::{Client, SimpleQueryMessage};
 use serde_json::json;
+use tokio_postgres::{Client, SimpleQueryMessage};
 
 pub fn list_tools() -> serde_json::Value {
+    let database_param = json!({
+        "type": "string",
+        "description": "Alias do databases.yaml. Se omitido, usa o 'default' configurado."
+    });
+
     json!({
         "tools": [
             {
@@ -11,7 +16,8 @@ pub fn list_tools() -> serde_json::Value {
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "query": { "type": "string", "description": "The raw SQL query to execute" }
+                        "query": { "type": "string", "description": "The raw SQL query to execute" },
+                        "database": database_param
                     },
                     "required": ["query"]
                 }
@@ -21,7 +27,9 @@ pub fn list_tools() -> serde_json::Value {
                 "description": "Get a schema layout of tables, columns, and types in the database.",
                 "inputSchema": {
                     "type": "object",
-                    "properties": {},
+                    "properties": {
+                        "database": database_param
+                    },
                     "required": []
                 }
             },
@@ -31,7 +39,8 @@ pub fn list_tools() -> serde_json::Value {
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "query": { "type": "string", "description": "The SQL query to analyze" }
+                        "query": { "type": "string", "description": "The SQL query to analyze" },
+                        "database": database_param
                     },
                     "required": ["query"]
                 }
@@ -43,9 +52,55 @@ pub fn list_tools() -> serde_json::Value {
                     "type": "object",
                     "properties": {
                         "table_name": { "type": "string", "description": "The name of the table to vacuum" },
-                        "analyze": { "type": "boolean", "description": "Whether to also update statistics (VACUUM ANALYZE)" }
+                        "analyze": { "type": "boolean", "description": "Whether to also update statistics (VACUUM ANALYZE)" },
+                        "database": database_param
                     },
                     "required": ["table_name"]
+                }
+            },
+            {
+                "name": "list_databases",
+                "description": "List all configured databases (aliases) from databases.yaml plus runtime credential status.",
+                "inputSchema": { "type": "object", "properties": {}, "required": [] }
+            },
+            {
+                "name": "discover_k8s_databases",
+                "description": "Discover Postgres databases from the active Kubernetes cluster (CNPG, Zalando, Bitnami helm, Service:5432) and optionally local sources (localhost, Docker). Updates databases.yaml.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "include_local": { "type": "boolean", "description": "Also scan localhost:5432 and local Docker containers (default: true)" },
+                        "dry_run": { "type": "boolean", "description": "If true, do not write databases.yaml; just report what would change (default: false)" },
+                        "sources": {
+                            "type": "array",
+                            "items": { "type": "string", "enum": ["k8s-cnpg", "k8s-zalando", "k8s-generic", "local-host", "local-docker"] },
+                            "description": "Restrict discovery to these sources. Omit to run all."
+                        }
+                    },
+                    "required": []
+                }
+            },
+            {
+                "name": "set_database_credentials",
+                "description": "Provide a password for a database alias for the current session only. Never persisted to disk.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "database": { "type": "string", "description": "Alias do databases.yaml" },
+                        "password": { "type": "string", "description": "Senha do usuario configurado para o alias" }
+                    },
+                    "required": ["database", "password"]
+                }
+            },
+            {
+                "name": "set_default_database",
+                "description": "Update which alias is the 'default' in databases.yaml.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "database": { "type": "string", "description": "Alias do databases.yaml" }
+                    },
+                    "required": ["database"]
                 }
             }
         ]
@@ -54,7 +109,7 @@ pub fn list_tools() -> serde_json::Value {
 
 pub async fn handle_execute_query(client: &Client, query: &str) -> Result<serde_json::Value> {
     let messages = client.simple_query(query).await?;
-    
+
     let mut results = Vec::new();
     let mut current_rows = Vec::new();
 
@@ -94,34 +149,39 @@ pub async fn handle_execute_query(client: &Client, query: &str) -> Result<serde_
 
 pub async fn handle_describe_database(client: &Client) -> Result<serde_json::Value> {
     let query = "
-        SELECT 
-            t.table_schema, 
-            t.table_name, 
-            c.column_name, 
+        SELECT
+            t.table_schema,
+            t.table_name,
+            c.column_name,
             c.data_type
         FROM information_schema.tables t
-        JOIN information_schema.columns c 
-            ON t.table_name = c.table_name 
+        JOIN information_schema.columns c
+            ON t.table_name = c.table_name
             AND t.table_schema = c.table_schema
         WHERE t.table_schema NOT IN ('pg_catalog', 'information_schema')
         ORDER BY t.table_schema, t.table_name, c.ordinal_position;
     ";
-    
+
     handle_execute_query(client, query).await
 }
 
 pub async fn handle_analyze_query_plan(client: &Client, query: &str) -> Result<serde_json::Value> {
-    // Prefix the user query with EXPLAIN ANALYZE
     let explain_query = format!("EXPLAIN (ANALYZE, COSTS, BUFFERS) {}", query);
     handle_execute_query(client, &explain_query).await
 }
 
 pub async fn handle_run_vacuum(client: &Client, table_name: &str, analyze: bool) -> Result<serde_json::Value> {
-    // Sanitize table_name naively by wrapping in quotes to prevent simple injections, 
-    // although DBA tools assume a trusted admin.
     let safe_table = format!("\"{}\"", table_name.replace("\"", "\"\""));
     let analyze_clause = if analyze { "ANALYZE" } else { "" };
     let vacuum_query = format!("VACUUM {} {};", analyze_clause, safe_table);
-    
+
     handle_execute_query(client, &vacuum_query).await
+}
+
+pub fn json_response(value: &serde_json::Value) -> serde_json::Value {
+    json!({
+        "content": [
+            { "type": "text", "text": serde_json::to_string_pretty(value).unwrap_or_default() }
+        ]
+    })
 }
