@@ -1,4 +1,5 @@
 mod credentials;
+mod ctl;
 mod db;
 mod discovery;
 mod mcp_protocol;
@@ -21,6 +22,11 @@ use crate::tools_registry::AppState;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() > 1 && args[1] == "ctl" {
+        return ctl::run_ctl(&args[2..]).await;
+    }
+
     eprintln!("Postgres MCP Server starting on stdio...");
 
     let cwd = std::env::current_dir()?;
@@ -125,7 +131,7 @@ async fn handle_tools_call(
         "set_default_database" => tools_registry::handle_set_default_database(state, &arguments)
             .await
             .map_err(|e| (-32000, format!("{:#}", e))),
-        "execute_query" | "describe_database" | "analyze_query_plan" | "run_vacuum" => {
+        "execute_query" | "describe_database" | "analyze_query_plan" | "run_vacuum" | "show_table_sizes" | "show_index_stats" | "list_active_queries" => {
             run_query_tool(state, &name, &arguments).await
         }
         _ => Err((-32601, format!("Tool '{}' nao encontrada", name))),
@@ -192,6 +198,15 @@ async fn run_query_tool(
                 .await
                 .map_err(|e| (-32000, format!("{:#}", e)))
         }
+        "show_table_sizes" => tools::handle_show_table_sizes(&client)
+            .await
+            .map_err(|e| (-32000, format!("{:#}", e))),
+        "show_index_stats" => tools::handle_show_index_stats(&client)
+            .await
+            .map_err(|e| (-32000, format!("{:#}", e))),
+        "list_active_queries" => tools::handle_list_active_queries(&client)
+            .await
+            .map_err(|e| (-32000, format!("{:#}", e))),
         _ => Err((-32601, format!("Tool '{}' nao encontrada", name))),
     }
 }

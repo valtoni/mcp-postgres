@@ -388,3 +388,130 @@ async fn persist_if_needed(state: &RegistryState) -> Result<()> {
         .with_context(|| format!("falha renomeando {} -> {}", tmp.display(), path.display()))?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_valid_password_ref() {
+        assert!(is_valid_password_ref("env://MY_VAR"));
+        assert!(is_valid_password_ref("k8s-secret://ns/name/key"));
+        assert!(is_valid_password_ref("vault://path#key"));
+        assert!(!is_valid_password_ref("plaintextpassword"));
+        assert!(!is_valid_password_ref("http://some-url"));
+    }
+
+    #[test]
+    fn test_unique_alias() {
+        let existing = vec![
+            DatabaseEntry {
+                alias: "db".to_string(),
+                host: "host".to_string(),
+                port: 5432,
+                user: "user".to_string(),
+                database: "db".to_string(),
+                password_ref: "env://PWD".to_string(),
+                source: Source::Static,
+                description: None,
+                cluster_ref: None,
+                container_id: None,
+                discovered_at: None,
+            }
+        ];
+
+        assert_eq!(unique_alias(&existing, "db_new"), "db_new");
+        assert_eq!(unique_alias(&existing, "db"), "db-2");
+    }
+
+    #[test]
+    fn test_parse_registry_valid() {
+        let yaml = r#"
+version: 1
+default: local
+databases:
+  - alias: local
+    host: localhost
+    port: 5432
+    user: postgres
+    database: postgres
+    password_ref: "env://PGPASSWORD"
+    source: static
+"#;
+        let res = parse_registry(yaml);
+        assert!(res.is_ok());
+        let file = res.unwrap();
+        assert_eq!(file.version, 1);
+        assert_eq!(file.default, Some("local".to_string()));
+        assert_eq!(file.databases.len(), 1);
+        assert_eq!(file.databases[0].alias, "local");
+    }
+
+    #[test]
+    fn test_parse_registry_forbidden_password() {
+        // Must reject literal password
+        let yaml = r#"
+version: 1
+default: local
+databases:
+  - alias: local
+    host: localhost
+    port: 5432
+    user: postgres
+    database: postgres
+    password: "my-literal-password"
+    password_ref: "env://PGPASSWORD"
+    source: static
+"#;
+        let res = parse_registry(yaml);
+        assert!(res.is_err());
+        let err_msg = format!("{:#}", res.unwrap_err());
+        assert!(err_msg.contains("literal proibido"));
+    }
+
+    #[test]
+    fn test_parse_registry_invalid_password_ref() {
+        let yaml = r#"
+version: 1
+databases:
+  - alias: local
+    host: localhost
+    port: 5432
+    user: postgres
+    database: postgres
+    password_ref: "invalid-ref://abc"
+    source: static
+"#;
+        let res = parse_registry(yaml);
+        assert!(res.is_err());
+        let err_msg = format!("{:#}", res.unwrap_err());
+        assert!(err_msg.contains("password_ref invalida"));
+    }
+
+    #[test]
+    fn test_parse_registry_duplicate_alias() {
+        let yaml = r#"
+version: 1
+databases:
+  - alias: local
+    host: localhost
+    port: 5432
+    user: postgres
+    database: postgres
+    password_ref: "env://PGPASSWORD"
+    source: static
+  - alias: local
+    host: localhost
+    port: 5433
+    user: postgres
+    database: postgres
+    password_ref: "env://PGPASSWORD"
+    source: static
+"#;
+        let res = parse_registry(yaml);
+        assert!(res.is_err());
+        let err_msg = format!("{:#}", res.unwrap_err());
+        assert!(err_msg.contains("alias duplicado"));
+    }
+}
+

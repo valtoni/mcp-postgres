@@ -102,6 +102,39 @@ pub fn list_tools() -> serde_json::Value {
                     },
                     "required": ["database"]
                 }
+            },
+            {
+                "name": "show_table_sizes",
+                "description": "Get the physical size on disk of all tables and their indexes in the database.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "database": database_param
+                    },
+                    "required": []
+                }
+            },
+            {
+                "name": "show_index_stats",
+                "description": "Get statistics about index scans and usage to identify unused or low-performance indexes.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "database": database_param
+                    },
+                    "required": []
+                }
+            },
+            {
+                "name": "list_active_queries",
+                "description": "List currently active database connections, their executing queries, and whether they are blocked.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "database": database_param
+                    },
+                    "required": []
+                }
             }
         ]
     })
@@ -176,6 +209,55 @@ pub async fn handle_run_vacuum(client: &Client, table_name: &str, analyze: bool)
     let vacuum_query = format!("VACUUM {} {};", analyze_clause, safe_table);
 
     handle_execute_query(client, &vacuum_query).await
+}
+
+pub async fn handle_show_table_sizes(client: &Client) -> Result<serde_json::Value> {
+    let query = "
+        SELECT 
+            relname AS table_name,
+            pg_size_pretty(pg_total_relation_size(c.oid)) AS total_size,
+            pg_size_pretty(pg_relation_size(c.oid)) AS table_size,
+            pg_size_pretty(pg_total_relation_size(c.oid) - pg_relation_size(c.oid)) AS index_size
+        FROM pg_class c
+        LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+          AND c.relkind = 'r'
+        ORDER BY pg_total_relation_size(c.oid) DESC;
+    ";
+    handle_execute_query(client, query).await
+}
+
+pub async fn handle_show_index_stats(client: &Client) -> Result<serde_json::Value> {
+    let query = "
+        SELECT
+            schemaname,
+            relname AS table_name,
+            indexrelname AS index_name,
+            idx_scan AS number_of_scans,
+            idx_tup_read AS tuples_read,
+            idx_tup_fetch AS tuples_fetched
+        FROM pg_stat_user_indexes
+        ORDER BY idx_scan ASC;
+    ";
+    handle_execute_query(client, query).await
+}
+
+pub async fn handle_list_active_queries(client: &Client) -> Result<serde_json::Value> {
+    let query = "
+        SELECT
+            pid,
+            usename AS user_name,
+            client_addr AS client_ip,
+            backend_start,
+            query_start,
+            state,
+            wait_event_type,
+            wait_event,
+            query
+        FROM pg_stat_activity
+        WHERE state != 'idle' AND pid != pg_backend_pid();
+    ";
+    handle_execute_query(client, query).await
 }
 
 pub fn json_response(value: &serde_json::Value) -> serde_json::Value {

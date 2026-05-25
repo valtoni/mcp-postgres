@@ -1,0 +1,11 @@
+version: 1
+default: local
+databases:
+  - alias: local
+    host: host.docker.internal
+    port: 5432
+    user: budget
+    database: example_budget
+    password_ref: "env://PGPASSWORD"
+    source: static
+    description: "Postgres example-budget-db local"

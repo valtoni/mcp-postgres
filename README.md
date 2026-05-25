@@ -4,11 +4,41 @@ A highly optimized Rust-based Model Context Protocol (MCP) server that empowers 
 
 ## Começo rápido
 
-Em menos de 2 minutos você consegue:
+### Caminho automatizado (Windows)
 
-1. **Build da imagem** (uma vez):
+Há um `setup.ps1` na raiz do projeto que faz todo o trabalho de configuração. 
+
+> 💡 **Nota Importante sobre Kubernetes**: Se você utiliza um cluster Kubernetes com um arquivo de `KUBECONFIG` em um caminho customizado, **defina a variável `$env:KUBECONFIG` no seu terminal antes de executar o script**. O instalador capturará e normalizará o caminho automaticamente, gerando a configuração correta e sem aspas para os clientes MCP.
+> 
+> ```powershell
+> # Exemplo (antes de rodar o setup):
+> $env:KUBECONFIG="C:/caminho/para/seu/kubeconfig"
+> ```
+
+Execute o script de setup:
+
+```powershell
+.\setup.ps1                                         # configura Claude Desktop, Codex CLI e Gemini CLI
+.\setup.ps1 -Tools claude,gemini -Yes               # restringir clientes; aceitar sobrescritas
+.\setup.ps1 -YamlTemplateAt C:\projetos\meu-app     # tambem cria um databases.yaml de exemplo
+```
+
+O script:
+
+- verifica Docker rodando e baixa a imagem (`valtoni/mcp-dba-postgres:1.1`) se ainda não estiver local;
+- atualiza `%APPDATA%\Claude\claude_desktop_config.json`, `~\.codex\config.toml` e `~\.gemini\settings.json` preservando outras entradas;
+- faz backup `*.bak.<timestamp>` antes de qualquer escrita.
+
+Após rodar: defina `$env:PGPASSWORD` no terminal, reinicie o cliente e peça `list_databases` para validar.
+
+### Caminho manual
+
+Em menos de 2 minutos:
+
+1. **Garanta a imagem** (build local opcional, senão o `docker run` baixa do Hub na primeira execução):
    ```bash
-   docker-compose build
+   docker-compose build      # opcional, se quiser buildar do código
+   docker pull valtoni/mcp-dba-postgres:1.1   # ou simplesmente deixar o `docker run` baixar sozinho
    ```
 
 2. **Crie um `databases.yaml`** na raiz do projeto onde o agente vai rodar:
@@ -34,19 +64,22 @@ Em menos de 2 minutos você consegue:
    ```
 
 4. **Configure seu cliente MCP**. Snippet pronto para Claude Desktop (`%APPDATA%\Claude\claude_desktop_config.json`):
-   ```json
-   {
-     "mcpServers": {
-       "mcp-dba-postgres": {
-         "command": "cmd.exe",
-         "args": [
-           "/c",
-           "docker run -i --rm -e PGPASSWORD -v %cd%:/project -w /project -v %USERPROFILE%\\.kube:/root/.kube:ro -v //./pipe/docker_engine://./pipe/docker_engine valtoni/mcp-dba-postgres:1.1"
-         ]
-       }
-     }
-   }
-   ```
+    ```json
+    {
+      "mcpServers": {
+        "mcp-dba-postgres": {
+          "command": "cmd.exe",
+          "args": [
+            "/c",
+            "docker run -i --rm -e PGPASSWORD -v %cd%:/project -w /project -v %USERPROFILE%\\.kube:/root/.kube:ro -v //./pipe/docker_engine://./pipe/docker_engine valtoni/mcp-dba-postgres:1.1"
+          ]
+        }
+      }
+    }
+    ```
+
+    > 💡 **Caso use um arquivo Kubeconfig customizado no Windows**, substitua a parte `-v %USERPROFILE%\.kube:/root/.kube:ro` por `-e KUBECONFIG=/kubeconfig -v C:/caminho/para/seu/kubeconfig:/kubeconfig:ro` (importante: sem aspas internas para não quebrar a chamada do `cmd.exe /c`).
+
    - `-v %cd%:/project -w /project` → o servidor lê `databases.yaml` do projeto atual.
    - `-v %USERPROFILE%\.kube:/root/.kube:ro` → habilita `discover_k8s_databases`.
    - `-v //./pipe/docker_engine://./pipe/docker_engine` (Windows) → habilita descoberta de containers Docker locais.
@@ -158,8 +191,11 @@ Isso popula a senha na sessão e invalida qualquer conexão antiga para o alias.
 
 ### Claude Desktop
 
-`%APPDATA%\Claude\claude_desktop_config.json` (Windows) ou `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS):
+`%APPDATA%\Claude\claude_desktop_config.json` (Windows) ou `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS).
 
+Você pode configurar automaticamente rodando `.\setup.ps1` (ou `.\setup.ps1 -Tools claude`).
+
+#### Configuração Padrão (Windows)
 ```json
 {
   "mcpServers": {
@@ -168,6 +204,22 @@ Isso popula a senha na sessão e invalida qualquer conexão antiga para o alias.
       "args": [
         "/c",
         "docker run -i --rm -e PGPASSWORD -v %cd%:/project -w /project -v %USERPROFILE%\\.kube:/root/.kube:ro -v //./pipe/docker_engine://./pipe/docker_engine valtoni/mcp-dba-postgres:1.1"
+      ]
+    }
+  }
+}
+```
+
+#### Configuração com Kubeconfig Customizado (Windows)
+Se você utiliza uma variável de ambiente `KUBECONFIG` apontando para um caminho de arquivo customizado, utilize:
+```json
+{
+  "mcpServers": {
+    "mcp-dba-postgres": {
+      "command": "cmd.exe",
+      "args": [
+        "/c",
+        "docker run -i --rm -e PGPASSWORD -v %cd%:/project -w /project -e KUBECONFIG=/kubeconfig -v C:/caminho/para/seu/kubeconfig:/kubeconfig:ro -v //./pipe/docker_engine://./pipe/docker_engine valtoni/mcp-dba-postgres:1.1"
       ]
     }
   }

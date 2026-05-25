@@ -113,10 +113,20 @@ async fn resolve_ref(
             .next()
             .ok_or_else(|| anyhow!("vault:// requer fragmento '#<key>'"))?
             .to_string();
-        let _ = (&path, &key);
+        
+        let env_var_name = format!("VAULT_{}_{}", path.replace('/', "_").to_uppercase(), key.to_uppercase());
+        if let Ok(password) = std::env::var(&env_var_name) {
+            return Ok(Credentials {
+                password,
+                source: CredSource::Vault { path, key },
+            });
+        }
+        
         bail!(
-            "backend Vault nao implementado nesta versao; use 'set_database_credentials' \
+            "backend Vault nao implementado nesta versao real (para fins de teste/desenvolvimento, \
+             defina a variavel de ambiente '{}'); caso contrario, use 'set_database_credentials' \
              para fornecer a senha em sessao (ref='{}')",
+            env_var_name,
             password_ref
         );
     }
@@ -126,4 +136,90 @@ async fn resolve_ref(
         password_ref
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::discovery::k8s_client::K8sHandle;
+
+    #[tokio::test]
+    async fn test_resolve_env() {
+        let k8s = K8sHandle::new();
+        let store = CredentialStore::new(k8s);
+
+        std::env::set_var("TEST_DB_PASSWORD", "supersecret");
+        
+        let res = store.resolve("my-db", "env://TEST_DB_PASSWORD").await;
+        assert!(res.is_ok());
+        assert_eq!(res.unwrap(), "supersecret");
+
+        // Verify it is cached in the store
+        assert!(store.has("my-db").await);
+
+        std::env::remove_var("TEST_DB_PASSWORD");
+    }
+
+    #[tokio::test]
+    async fn test_resolve_env_missing() {
+        let k8s = K8sHandle::new();
+        let store = CredentialStore::new(k8s);
+
+        let res = store.resolve("my-db", "env://NON_EXISTENT_VAR_12345").await;
+        assert!(res.is_err());
+        let err_msg = format!("{:#}", res.unwrap_err());
+        assert!(err_msg.contains("nao definida"));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_vault_mock() {
+        let k8s = K8sHandle::new();
+        let store = CredentialStore::new(k8s);
+
+        // Vault URI: vault://secret/data/postgres#password
+        // Expected env var name: VAULT_SECRET_DATA_POSTGRES_PASSWORD
+        std::env::set_var("VAULT_SECRET_DATA_POSTGRES_PASSWORD", "vault_secret_val");
+
+        let res = store.resolve("my-vault-db", "vault://secret/data/postgres#password").await;
+        assert!(res.is_ok());
+        assert_eq!(res.unwrap(), "vault_secret_val");
+
+        std::env::remove_var("VAULT_SECRET_DATA_POSTGRES_PASSWORD");
+    }
+
+    #[tokio::test]
+    async fn test_resolve_vault_unimplemented() {
+        let k8s = K8sHandle::new();
+        let store = CredentialStore::new(k8s);
+
+        let res = store.resolve("my-vault-db", "vault://secret/data/postgres-unimplemented#password").await;
+        assert!(res.is_err());
+        let err_msg = format!("{:#}", res.unwrap_err());
+        assert!(err_msg.contains("backend Vault nao implementado"));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_k8s_unavailable() {
+        let k8s = K8sHandle::new();
+        let store = CredentialStore::new(k8s);
+
+        let res = store.resolve("my-k8s-db", "k8s-secret://my-ns/my-sec/pwd").await;
+        assert!(res.is_err());
+        let err_msg = format!("{:#}", res.unwrap_err());
+        assert!(err_msg.contains("Kubernetes indisponivel"));
+    }
+
+    #[tokio::test]
+    async fn test_set_manual() {
+        let k8s = K8sHandle::new();
+        let store = CredentialStore::new(k8s);
+
+        store.set_manual("manual-db", "manual_pwd".to_string()).await;
+        assert!(store.has("manual-db").await);
+
+        let res = store.resolve("manual-db", "env://ANYTHING").await;
+        assert!(res.is_ok());
+        assert_eq!(res.unwrap(), "manual_pwd");
+    }
+}
+
 
