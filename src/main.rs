@@ -22,6 +22,9 @@ use crate::tools_registry::AppState;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Load .env file variables into the process environment
+    dotenvy::dotenv().ok();
+
     let args: Vec<String> = std::env::args().collect();
     if args.len() > 1 && args[1] == "ctl" {
         return ctl::run_ctl(&args[2..]).await;
@@ -33,7 +36,7 @@ async fn main() -> Result<()> {
     let registry = Arc::new(Registry::load_or_legacy(&cwd).await?);
     let k8s = K8sHandle::new();
     let credentials = Arc::new(CredentialStore::new(k8s.clone()));
-    let pool = Arc::new(ConnectionPool::new(registry.clone(), credentials.clone()));
+    let pool = Arc::new(ConnectionPool::new(registry.clone(), credentials.clone(), k8s.clone()));
 
     let state = Arc::new(AppState {
         registry,

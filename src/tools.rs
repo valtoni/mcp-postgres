@@ -60,12 +60,12 @@ pub fn list_tools() -> serde_json::Value {
             },
             {
                 "name": "list_databases",
-                "description": "List all configured databases (aliases) from databases.yaml plus runtime credential status.",
+                "description": "List all configured databases from databases.yaml plus runtime credential status. Note: databases.yaml strictly forbids plain passwords; it uses secure 'password_ref' URIs: 'env://VAR' (loads from the loaded .env file or environment), 'k8s-secret://namespace/secret/key' (dynamically resolved from cluster secrets), or 'vault://path#key' (strictly resolved from the in-cluster HashiCorp Vault using VAULT_ADDR and VAULT_TOKEN environment variables automatically loaded from the project's root .env file). If VAULT_ADDR points to a service inside the cluster (ending in .svc.cluster.local), the MCP server automatically establishes an in-memory port-forward tunnel to it.",
                 "inputSchema": { "type": "object", "properties": {}, "required": [] }
             },
             {
                 "name": "discover_k8s_databases",
-                "description": "Discover Postgres databases from the active Kubernetes cluster (CNPG, Zalando, Bitnami helm, Service:5432) and optionally local sources (localhost, Docker). Updates databases.yaml.",
+                "description": "Discover Postgres databases from the active Kubernetes cluster (CNPG, Zalando, Bitnami helm, Service:5432) and optionally local sources (localhost, Docker). Automatically generates secure 'k8s-secret://...' password references and updates databases.yaml. To override credentials to use HashiCorp Vault, manually update its password_ref in databases.yaml to 'vault://secret/path#key' (which will be resolved strictly via Vault, loading VAULT_ADDR and VAULT_TOKEN from the project's root .env file).",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -82,7 +82,7 @@ pub fn list_tools() -> serde_json::Value {
             },
             {
                 "name": "set_database_credentials",
-                "description": "Provide a password for a database alias for the current session only. Never persisted to disk.",
+                "description": "Provide a password in-memory for a database alias for the current session only. Never persisted. Use this if the configured 'password_ref' (env://, k8s-secret://, vault://) is missing or auth fails.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {

@@ -75,7 +75,7 @@ function Backup-File([string]$path) {
 }
 
 function Write-TextUtf8NoBom([string]$path, [string]$content) {
-    $dir = Split-Path -LiteralPath $path -Parent
+    $dir = Split-Path -Path $path -Parent
     if ($dir -and -not (Test-Path -LiteralPath $dir)) {
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
     }
@@ -87,7 +87,7 @@ function Get-DockerRunCommandLine([string]$image) {
     $cmd = 'docker run -i --rm -e PGPASSWORD -v %cd%:/project -w /project'
     if ($env:KUBECONFIG) {
         $kpath = $env:KUBECONFIG.Replace('\', '/')
-        $cmd += " -e KUBECONFIG=/kubeconfig -v $kpath`:/kubeconfig:ro"
+        $cmd += " -e KUBECONFIG=/kubeconfig -v " + $kpath + ":/kubeconfig:ro"
     } else {
         $cmd += ' -v %USERPROFILE%\.kube:/root/.kube:ro'
     }
@@ -120,7 +120,7 @@ function Update-JsonMcpConfig([string]$path, [string]$image, [string]$label) {
     }
 
     if (-not $config.PSObject.Properties.Match('mcpServers').Count) {
-        $config | Add-Member -NotePropertyName mcpServers -NotePropertyValue ([pscustomobject]@{})
+        $config | Add-Member -MemberType NoteProperty -Name 'mcpServers' -Value ([pscustomobject]@{})
     }
 
     $entry = New-JsonMcpEntry $image
@@ -133,7 +133,7 @@ function Update-JsonMcpConfig([string]$path, [string]$image, [string]$label) {
         }
         $config.mcpServers.$ServerName = $entry
     } else {
-        $config.mcpServers | Add-Member -NotePropertyName $ServerName -NotePropertyValue $entry
+        $config.mcpServers | Add-Member -MemberType NoteProperty -Name $ServerName -Value $entry
     }
 
     $json = $config | ConvertTo-Json -Depth 32
@@ -234,7 +234,12 @@ if (Test-LocalImage $Image) {
 
 foreach ($tool in $Tools) {
     switch ($tool) {
-        'claude' { Update-JsonMcpConfig "$env:APPDATA\Claude\claude_desktop_config.json" $Image "Claude Desktop" }
+        'claude' { 
+            Update-JsonMcpConfig "$env:APPDATA\Claude\claude_desktop_config.json" $Image "Claude Desktop"
+            if (Test-Path -LiteralPath "$env:USERPROFILE\.claude.json") {
+                Update-JsonMcpConfig "$env:USERPROFILE\.claude.json" $Image "Claude CLI (Claude Code)"
+            }
+        }
         'codex'  { Update-CodexTomlConfig "$env:USERPROFILE\.codex\config.toml" $Image }
         'gemini' { Update-JsonMcpConfig "$env:USERPROFILE\.gemini\settings.json" $Image "Gemini CLI" }
     }
